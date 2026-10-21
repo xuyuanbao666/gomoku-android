@@ -1,0 +1,5 @@
+# 构建中间产物与本地签名密钥，均不入库
+build/
+*.keystore
+*.idsig
+.DS_Store
