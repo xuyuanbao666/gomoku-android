@@ -59,7 +59,8 @@ jobs:
           profile: pixel_6
           emulator-options: -no-window -gpu swangle -feature -Vulkan -no-snapshot -noaudio -no-boot-anim
           disable-animations: true
-          script: bash -e -c 'adb install candidate/gomoku-game-1.1.1-test.apk; adb logcat -c; adb shell am start -W -n com.gomoku.game/.MainActivity | tee candidate/launch.txt; grep -q "Status: ok" candidate/launch.txt; sleep 12; adb shell pidof com.gomoku.game; adb shell dumpsys activity activities | grep -E "mResumedActivity|topResumedActivity" | grep -F com.gomoku.game; adb exec-out screencap -p > candidate/screen.png; adb logcat -b crash -d > candidate/crash.txt; ! grep -F com.gomoku.game candidate/crash.txt'
+          script: >-
+            bash -e -c 'adb install candidate/gomoku-game-1.1.1-test.apk; adb logcat -c; adb shell am start -W -n com.gomoku.game/.MainActivity | tee candidate/launch.txt; grep -q "Status: ok" candidate/launch.txt; sleep 12; adb shell pidof com.gomoku.game; adb shell dumpsys activity activities | grep -E "mResumedActivity|topResumedActivity" | grep -F com.gomoku.game; adb exec-out screencap -p > candidate/screen.png; adb logcat -b crash -d > candidate/crash.txt; ! grep -F com.gomoku.game candidate/crash.txt'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
