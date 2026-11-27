@@ -1,0 +1,68 @@
+name: Android maintenance release candidate
+on:
+  push:
+    branches: [release/maintenance-20261127]
+permissions:
+  contents: read
+jobs:
+  candidate:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node tests/test_gomoku.js
+      - name: Install SDK and build from corrected source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:?}"
+          "$sdk/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0"
+          bt="$sdk/build-tools/34.0.0"
+          jar="$sdk/platforms/android-34/android.jar"
+          mkdir -p build/gen build/classes build/dex build/assets candidate
+          cp web/gomoku.html build/assets/
+          "$bt/aapt" package -f -m -J build/gen -M android/AndroidManifest.xml -S android/res -I "$jar"
+          find android/src build/gen -name '*.java' > build/sources.txt
+          javac -source 8 -target 8 -classpath "$jar" -d build/classes @build/sources.txt
+          find build/classes -name '*.class' > build/classes.txt
+          "$bt/d8" --release --lib "$jar" --min-api 21 --output build/dex @build/classes.txt
+          "$bt/aapt" package -f -M android/AndroidManifest.xml -S android/res -A build/assets -I "$jar" -F build/unsigned.apk
+          (cd build/dex && zip -q ../unsigned.apk classes.dex)
+          "$bt/zipalign" -f 4 build/unsigned.apk build/aligned.apk
+          keytool -genkeypair -keystore "$RUNNER_TEMP/test.p12" -storetype PKCS12 -alias test -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname 'CN=CI test only'
+          "$bt/apksigner" sign --ks "$RUNNER_TEMP/test.p12" --ks-pass pass:android --key-pass pass:android --out candidate/gomoku-game-1.1.1-test.apk build/aligned.apk
+          "$bt/apksigner" verify --verbose --print-certs candidate/*.apk | tee candidate/signature.txt
+          "$bt/aapt" dump badging candidate/*.apk | tee candidate/badging.txt
+          grep -F "package: name='com.gomoku.game' versionCode='3' versionName='1.1.1'" candidate/badging.txt
+          unzip -p candidate/*.apk assets/gomoku.html | cmp - web/gomoku.html
+          (cd candidate && sha256sum *.apk > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
+          "$bt/apksigner" verify --print-certs releases/gomoku-game.apk > candidate/previous-signature.txt
+          echo 'Fresh test certificate; no stable upgrade claim.' > candidate/signing-status.txt
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install and launch candidate
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          emulator-options: -no-window -gpu swangle -feature -Vulkan -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: bash -e -c 'adb install candidate/gomoku-game-1.1.1-test.apk; adb logcat -c; adb shell am start -W -n com.gomoku.game/.MainActivity | tee candidate/launch.txt; grep -q "Status: ok" candidate/launch.txt; sleep 12; adb shell pidof com.gomoku.game; adb shell dumpsys activity activities | grep -E "mResumedActivity|topResumedActivity" | grep -F com.gomoku.game; adb exec-out screencap -p > candidate/screen.png; adb logcat -b crash -d > candidate/crash.txt; ! grep -F com.gomoku.game candidate/crash.txt'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gomoku-game-1.1.1-candidate
+          path: candidate/
+          if-no-files-found: error
